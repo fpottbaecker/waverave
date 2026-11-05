@@ -121,6 +121,11 @@ impl Receive {
         self.transfer_size
     }
 
+    /// Get the chosen transfer size, in samples.
+    pub async fn set_freq(&self, freq_hz: u64) -> Result<(), Error> {
+        self.rf.set_freq(freq_hz).await
+    }
+
     /// Queue up a receive transfer.
     ///
     /// This will pull from a reusable buffer pool first, and allocate a new
