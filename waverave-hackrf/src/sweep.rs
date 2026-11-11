@@ -1,9 +1,7 @@
 use nusb::transfer::{ControlOut, ControlType, Recipient, RequestBuffer};
 
 use crate::{
-    Buffer, Error, HackRf, baseband_filter_bw,
-    consts::{ControlRequest, TransceiverMode},
-    error::StateChangeError,
+    Buffer, ComplexI8, Error, HackRf, baseband_filter_bw, consts::{ControlRequest, TransceiverMode}, error::StateChangeError,
 };
 
 /// Configuration settings for a receive sweep across multiple frequencies.
@@ -93,15 +91,26 @@ impl SweepBuf {
     }
 
     /// Access the retrieved samples in this tuning block.
-    pub fn samples(&self) -> &[num_complex::Complex<i8>] {
+    pub fn samples(&self) -> &[ComplexI8] {
         // We checked this range would be valid when we made SweepBuf.
         unsafe { self.buf.samples().get_unchecked(5..) }
     }
 
     /// Mutably access the retrieved samples in this tuning block.
-    pub fn samples_mut(&mut self) -> &mut [num_complex::Complex<i8>] {
+    pub fn samples_mut(&mut self) -> &mut [ComplexI8] {
         // We checked this range would be valid when we made SweepBuf.
         unsafe { self.buf.samples_mut().get_unchecked_mut(5..) }
+    }
+
+    /// Access the retrieved samples in this tuning block.
+    pub fn samples_checked(&self) -> &[ComplexI8] {
+        // We checked this range would be valid when we made SweepBuf.
+        self.buf.samples().get(5..).unwrap()
+    }
+
+    /// Access all raw retrieved samples in this tuning block (includes 5 invalid header samples)
+    pub fn all_samples(&self) -> &[ComplexI8] {
+        self.buf.samples()
     }
 
     fn parse(buf: Buffer) -> Result<Self, Error> {
@@ -116,7 +125,7 @@ impl SweepBuf {
         if header != &[0x7f, 0x7f] {
             return Err(Error::ReturnData);
         }
-        let freq_hz = u64::from_le_bytes(freq);
+        let freq_hz = u64::from_le_bytes(freq.clone());
         if !(100_000..=7_100_000_000).contains(&freq_hz) {
             return Err(Error::ReturnData);
         }
@@ -217,6 +226,7 @@ impl Sweep {
 
         // Build up the packed struct that we'll send to the HackRF
         let mut data = Vec::with_capacity(params.freq_mhz.len() * 4 + 9);
+        println!("N={}", data.capacity());
         data.extend_from_slice(&params.step_width_hz.to_le_bytes());
         data.extend_from_slice(&params.offset_hz.to_be_bytes());
         data.push(match params.mode {
@@ -238,10 +248,13 @@ impl Sweep {
             let lo_hz = lo as u64 * 1_000_000;
             let hi_hz = hi as u64 * 1_000_000;
             let steps = (hi_hz - lo_hz).div_ceil(params.step_width_hz.into());
-            let full_hi = lo + ((steps * params.step_width_hz as u64).div_ceil(1_000_000) as u16);
+            let full_hi: u16 = lo + ((steps * params.step_width_hz as u64).div_ceil(1_000_000) as u16);
+
+            println!("{lo} {full_hi}; N={}", data.len());
 
             data.extend_from_slice(&lo.to_le_bytes());
             data.extend_from_slice(&full_hi.to_le_bytes());
+            println!("N={}", data.len());
         }
 
         let num_bytes = (params.blocks_per_tuning as u32) * (TUNING_BLOCK_BYTES as u32);
@@ -301,6 +314,10 @@ impl Sweep {
                 Err(e.into())
             }
         }
+    }
+
+    pub fn rf(&self) -> &HackRf {
+        &self.rf
     }
 
     /// Get the number of pending requests.

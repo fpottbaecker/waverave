@@ -843,6 +843,7 @@ impl HackRf {
             .await?;
 
         let filter_bw = baseband_filter_bw(freq_hz * 3 / (divider * 4));
+        println!("manual freq({} / {} = {:.5}): filter({}) = {}", freq_hz, divider, freq_hz as f32 / divider as f32, freq_hz * 3 / (divider * 4), filter_bw);
         self.set_baseband_filter_bandwidth(filter_bw).await?;
         Ok(())
     }
@@ -869,7 +870,9 @@ impl HackRf {
         // preferring the smaller divider value on ties
         for i in 1u32..32 {
             let new_freq_hz = (freq * (i as f64)).round() as u32;
-            let new_diff = ((freq_hz as f64) / (i as f64) - freq).abs();
+            let new_freq = (new_freq_hz as f64) / (i as f64);
+            let new_diff = (new_freq - freq).abs();
+
             if new_diff < diff {
                 freq_hz = new_freq_hz;
                 divider = i;
@@ -877,6 +880,7 @@ impl HackRf {
             }
         }
 
+        println!("{:.2} = ({} / {})", freq, freq_hz, divider);
         self.set_sample_rate_manual(freq_hz, divider).await
     }
 
