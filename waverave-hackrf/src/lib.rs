@@ -128,13 +128,21 @@ pub const PORT_B4: u8 = 7;
 /// some platform-specific way of allocating memory for zero-copy USB transfers.
 pub struct Buffer {
     buf: Vec<u8>,
-    pool: crossbeam_channel::Sender<Vec<u8>>,
+    pool: Option<crossbeam_channel::Sender<Vec<u8>>>,
 }
 
 impl Buffer {
     pub(crate) fn new(buf: Vec<u8>, pool: crossbeam_channel::Sender<Vec<u8>>) -> Self {
         assert!(buf.len() & 0x1FF == 0);
-        Self { buf, pool }
+        Self {
+            buf,
+            pool: Some(pool),
+        }
+    }
+
+    pub(crate) fn new_unmanaged(buf: Vec<u8>) -> Self {
+        assert!(buf.len() & 0x1FF == 0);
+        Self { buf, pool: None }
     }
 
     pub(crate) fn into_vec(mut self) -> Vec<u8> {
@@ -257,9 +265,11 @@ impl Buffer {
 
 impl Drop for Buffer {
     fn drop(&mut self) {
-        let inner = core::mem::take(&mut self.buf);
-        if inner.capacity() > 0 {
-            let _ = self.pool.send(inner);
+        if let Some(pool) = self.pool.as_ref() {
+            let inner = core::mem::take(&mut self.buf);
+            if inner.capacity() > 0 {
+                let _ = pool.send(inner);
+            }
         }
     }
 }
@@ -843,7 +853,14 @@ impl HackRf {
             .await?;
 
         let filter_bw = baseband_filter_bw(freq_hz * 3 / (divider * 4));
-        println!("manual freq({} / {} = {:.5}): filter({}) = {}", freq_hz, divider, freq_hz as f32 / divider as f32, freq_hz * 3 / (divider * 4), filter_bw);
+        println!(
+            "manual freq({} / {} = {:.5}): filter({}) = {}",
+            freq_hz,
+            divider,
+            freq_hz as f32 / divider as f32,
+            freq_hz * 3 / (divider * 4),
+            filter_bw
+        );
         self.set_baseband_filter_bandwidth(filter_bw).await?;
         Ok(())
     }

@@ -120,11 +120,11 @@ impl SweepBuf {
         }
         // SAFETY: We literally just checked the buffer is 16384 bytes. The
         // first 10 are there for sure.
-        let header: &[u8; 2] = unsafe { &*(bytes.as_ptr() as *const [u8; 2]) };
-        let freq: [u8; 8] = unsafe { *(bytes.as_ptr().add(2) as *const [u8; 8]) };
+        let (header, bytes) = bytes.split_first_chunk::<2>().unwrap();
         if header != &[0x7f, 0x7f] {
             return Err(Error::ReturnData);
         }
+        let (freq, _) = bytes.split_first_chunk::<8>().unwrap();
         let freq_hz = u64::from_le_bytes(freq.clone());
         if !(100_000..=7_100_000_000).contains(&freq_hz) {
             return Err(Error::ReturnData);
@@ -228,7 +228,7 @@ impl Sweep {
         let mut data = Vec::with_capacity(params.freq_mhz.len() * 4 + 9);
         println!("N={}", data.capacity());
         data.extend_from_slice(&params.step_width_hz.to_le_bytes());
-        data.extend_from_slice(&params.offset_hz.to_be_bytes());
+        data.extend_from_slice(&params.offset_hz.to_le_bytes());
         data.push(match params.mode {
             SweepMode::Linear => 0,
             SweepMode::Interleaved => 1,
@@ -316,8 +316,40 @@ impl Sweep {
         }
     }
 
+    pub fn submit_batch(&mut self) {
+        let req = if let Ok(buf) = self.rf.rx.buf_pool.try_recv() {
+            RequestBuffer::reuse(buf, SWEEP_BUF_SIZE * 16)
+        } else {
+            RequestBuffer::new(SWEEP_BUF_SIZE * 16)
+        };
+        self.rf.rx.queue.submit(req);
+    }
+
+    pub async fn next_complete_batch(&mut self) -> Result<Vec<SweepBuf>, Error> {
+        let result = self.rf.rx.queue.next_complete().await;
+        match result.status {
+            Ok(_) => {
+                let buffer: Result<Vec<SweepBuf>, _> = result.data.chunks_exact(SWEEP_BUF_SIZE).map(|d| {
+                    let buf = Buffer::new_unmanaged(d.to_vec());
+                    SweepBuf::parse(buf)
+                }).collect();
+                let _ = self.rf.rx.buf_pool_send.send(result.data);
+                buffer
+            }
+            Err(e) => {
+                // Reuse the buffer even in the event of an error.
+                let _ = self.rf.rx.buf_pool_send.send(result.data);
+                Err(e.into())
+            }
+        }
+    }
+
     pub fn rf(&self) -> &HackRf {
         &self.rf
+    }
+
+    pub fn rf_mut(&mut self) -> &mut HackRf {
+        &mut self.rf
     }
 
     /// Get the number of pending requests.
