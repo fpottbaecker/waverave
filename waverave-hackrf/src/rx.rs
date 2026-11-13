@@ -157,6 +157,16 @@ impl Receive {
         }
     }
 
+    /// Access the underlying HackRF device
+    pub fn rf(&self) -> &HackRf {
+        &self.rf
+    }
+
+    /// Access the underlying HackRF device (mutable)
+    pub fn rf_mut(&mut self) -> &mut HackRf {
+        &mut self.rf
+    }
+
     /// Get the number of pending requests.
     pub fn pending(&self) -> usize {
         self.rf.rx.queue.pending()

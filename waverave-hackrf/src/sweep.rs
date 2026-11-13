@@ -226,7 +226,7 @@ impl Sweep {
 
         // Build up the packed struct that we'll send to the HackRF
         let mut data = Vec::with_capacity(params.freq_mhz.len() * 4 + 9);
-        println!("N={}", data.capacity());
+
         data.extend_from_slice(&params.step_width_hz.to_le_bytes());
         data.extend_from_slice(&params.offset_hz.to_le_bytes());
         data.push(match params.mode {
@@ -254,7 +254,6 @@ impl Sweep {
 
             data.extend_from_slice(&lo.to_le_bytes());
             data.extend_from_slice(&full_hi.to_le_bytes());
-            println!("N={}", data.len());
         }
 
         let num_bytes = (params.blocks_per_tuning as u32) * (TUNING_BLOCK_BYTES as u32);
@@ -316,38 +315,12 @@ impl Sweep {
         }
     }
 
-    pub fn submit_batch(&mut self) {
-        let req = if let Ok(buf) = self.rf.rx.buf_pool.try_recv() {
-            RequestBuffer::reuse(buf, SWEEP_BUF_SIZE * 16)
-        } else {
-            RequestBuffer::new(SWEEP_BUF_SIZE * 16)
-        };
-        self.rf.rx.queue.submit(req);
-    }
-
-    pub async fn next_complete_batch(&mut self) -> Result<Vec<SweepBuf>, Error> {
-        let result = self.rf.rx.queue.next_complete().await;
-        match result.status {
-            Ok(_) => {
-                let buffer: Result<Vec<SweepBuf>, _> = result.data.chunks_exact(SWEEP_BUF_SIZE).map(|d| {
-                    let buf = Buffer::new_unmanaged(d.to_vec());
-                    SweepBuf::parse(buf)
-                }).collect();
-                let _ = self.rf.rx.buf_pool_send.send(result.data);
-                buffer
-            }
-            Err(e) => {
-                // Reuse the buffer even in the event of an error.
-                let _ = self.rf.rx.buf_pool_send.send(result.data);
-                Err(e.into())
-            }
-        }
-    }
-
+    /// Access the underlying HackRF device
     pub fn rf(&self) -> &HackRf {
         &self.rf
     }
 
+    /// Access the underlying HackRF device (mutable)
     pub fn rf_mut(&mut self) -> &mut HackRf {
         &mut self.rf
     }

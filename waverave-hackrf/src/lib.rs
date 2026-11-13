@@ -1300,8 +1300,11 @@ impl HackRf {
     }
 
     /// Try and turn the HackRF to the off state, regardless of what mode it is currently in.
-    pub async fn turn_off(&self) -> Result<(), Error> {
-        self.set_transceiver_mode(TransceiverMode::Off).await
+    pub async fn turn_off(self) -> Result<HackRf, StateChangeError> {
+        if let Err(err) = self.set_transceiver_mode(TransceiverMode::Off).await {
+            return Err(StateChangeError { err, rf: self })
+        }
+        Ok(self)
     }
 }
 
